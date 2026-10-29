@@ -108,6 +108,41 @@ function TextClipboard() {
     }
   };
 
+  const deleteText = async (id) => {
+    setMessage("");
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      setMessage("Tu dois être connecté");
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:3000/items/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setMessage(data.error || "Erreur lors de la suppression");
+        return;
+      }
+
+      setMessage("Texte supprimé");
+
+      await loadTexts();
+    } catch {
+      setMessage("Impossible de contacter le serveur");
+    }
+  };
+
   return (
     <div>
       <h2>Envoyer un texte</h2>
@@ -138,6 +173,8 @@ function TextClipboard() {
             <pre>{item.text_content}</pre>
 
             <button onClick={() => copyText(item.text_content)}>Copier</button>
+
+            <button onClick={() => deleteText(item.id)}>Supprimer</button>
 
             <hr />
           </div>
