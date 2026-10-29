@@ -6,6 +6,7 @@ function App() {
   const [password, setPassword] = useState("");
   const [session, setSession] = useState(null);
   const [message, setMessage] = useState("");
+  const [text, setText] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -14,8 +15,8 @@ function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+    } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
     });
 
     return () => {
@@ -36,7 +37,7 @@ function App() {
       return;
     }
 
-    setMessage("Compte créé");
+    setMessage("Compte créé. Vérifie ton email si nécessaire.");
   };
 
   const login = async () => {
@@ -56,6 +57,8 @@ function App() {
   };
 
   const logout = async () => {
+    setMessage("");
+
     const { error } = await supabase.auth.signOut({
       scope: "local",
     });
@@ -68,6 +71,66 @@ function App() {
     setMessage("Déconnexion réussie");
   };
 
+  const testBackendAuth = async () => {
+    setMessage("");
+
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession();
+
+    if (!currentSession) {
+      setMessage("Aucune session active");
+      return;
+    }
+
+    const response = await fetch("http://localhost:3000/test-auth", {
+      headers: {
+        Authorization: `Bearer ${currentSession.access_token}`,
+      },
+    });
+
+    const data = await response.json();
+
+    console.log(data);
+    setMessage(JSON.stringify(data));
+  };
+
+  const sendText = async () => {
+    setMessage("");
+
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession();
+
+    if (!currentSession) {
+      setMessage("Tu dois être connecté");
+      return;
+    }
+
+    const response = await fetch("http://localhost:3000/items/text", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${currentSession.access_token}`,
+      },
+      body: JSON.stringify({
+        text,
+      }),
+    });
+
+    const data = await response.json();
+
+    console.log(data);
+
+    if (!response.ok) {
+      setMessage(data.error || "Erreur lors de l'envoi");
+      return;
+    }
+
+    setMessage("Texte enregistré");
+    setText("");
+  };
+
   if (session) {
     return (
       <div>
@@ -76,6 +139,26 @@ function App() {
         <p>{session.user.email}</p>
 
         <button onClick={logout}>Se déconnecter</button>
+
+        <button onClick={testBackendAuth}>
+          Tester l'authentification backend
+        </button>
+
+        <hr />
+
+        <h2>Envoyer un texte</h2>
+
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Colle ton texte ici"
+          rows={8}
+          cols={50}
+        />
+
+        <br />
+
+        <button onClick={sendText}>Envoyer le texte</button>
 
         <p>{message}</p>
       </div>
