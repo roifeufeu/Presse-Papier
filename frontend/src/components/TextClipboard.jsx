@@ -59,6 +59,15 @@ function TextClipboard() {
     }
   };
 
+  const copyText = async (textToCopy) => {
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setMessage("Texte copié");
+    } catch {
+      setMessage("Impossible de copier le texte");
+    }
+  };
+
   const sendText = async () => {
     setMessage("");
 
@@ -127,6 +136,9 @@ function TextClipboard() {
         items.map((item) => (
           <div key={item.id}>
             <pre>{item.text_content}</pre>
+
+            <button onClick={() => copyText(item.text_content)}>Copier</button>
+
             <hr />
           </div>
         ))
