@@ -1,76 +1,102 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
+async function fetchTexts() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    return [];
+  }
+
+  const response = await fetch("http://localhost:3000/items", {
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || "Erreur lors du chargement");
+  }
+
+  return data.items;
+}
+
 function TextClipboard() {
   const [text, setText] = useState("");
   const [message, setMessage] = useState("");
   const [items, setItems] = useState([]);
 
-  const loadTexts = async () => {
-    const {
-      data: { session: currentSession },
-    } = await supabase.auth.getSession();
-
-    if (!currentSession) {
-      return;
-    }
-
-    const response = await fetch("http://localhost:3000/items", {
-      headers: {
-        Authorization: `Bearer ${currentSession.access_token}`,
-      },
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      setMessage(data.error || "Erreur lors du chargement");
-      return;
-    }
-
-    setItems(data.items);
-  };
-
   useEffect(() => {
-    loadTexts();
+    let cancelled = false;
+
+    fetchTexts()
+      .then((texts) => {
+        if (!cancelled) {
+          setItems(texts);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setMessage(error.message);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const loadTexts = async () => {
+    try {
+      const texts = await fetchTexts();
+      setItems(texts);
+    } catch (error) {
+      setMessage(error.message);
+    }
+  };
 
   const sendText = async () => {
     setMessage("");
 
     const {
-      data: { session: currentSession },
+      data: { session },
     } = await supabase.auth.getSession();
 
-    if (!currentSession) {
+    if (!session) {
       setMessage("Tu dois être connecté");
       return;
     }
 
-    const response = await fetch("http://localhost:3000/items/text", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${currentSession.access_token}`,
-      },
-      body: JSON.stringify({
-        text,
-      }),
-    });
+    try {
+      const response = await fetch("http://localhost:3000/items/text", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          text,
+        }),
+      });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    console.log(data);
+      if (!response.ok) {
+        setMessage(data.error || "Erreur lors de l'envoi");
+        return;
+      }
 
-    if (!response.ok) {
-      setMessage(data.error || "Erreur lors de l'envoi");
-      return;
+      setMessage("Texte enregistré");
+      setText("");
+
+      await loadTexts();
+    } catch {
+      setMessage("Impossible de contacter le serveur");
     }
-
-    setMessage("Texte enregistré");
-    setText("");
-
-    loadTexts();
   };
 
   return (
