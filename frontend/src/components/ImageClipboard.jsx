@@ -151,6 +151,41 @@ function ImageClipboard() {
     }
   };
 
+  const deleteImage = async (id) => {
+    setMessage("");
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      setMessage("Tu dois être connecté");
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:3000/items/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setMessage(data.error || "Erreur lors de la suppression");
+        return;
+      }
+
+      setMessage("Image supprimée");
+
+      await loadImages();
+    } catch {
+      setMessage("Impossible de contacter le serveur");
+    }
+  };
+
   return (
     <div>
       <h2>Envoyer une image</h2>
@@ -196,6 +231,8 @@ function ImageClipboard() {
                 >
                   Télécharger
                 </button>
+
+                <button onClick={() => deleteImage(item.id)}>Supprimer</button>
               </>
             ) : (
               <p>Impossible de charger cette image</p>

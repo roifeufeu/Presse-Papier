@@ -438,22 +438,59 @@ app.delete("/items/:id", async (req, res) => {
     },
   );
 
-  const { error } = await userSupabase
+  // On récupère d'abord l'élément
+  const { data: item, error: itemError } = await userSupabase
     .from("clipboard_items")
-    .delete()
+    .select("id, type, storage_path")
     .eq("id", req.params.id)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .maybeSingle();
 
-  if (error) {
+  if (itemError) {
     return res.status(500).json({
       success: false,
-      error: error.message,
+      error: itemError.message,
+    });
+  }
+
+  if (!item) {
+    return res.status(404).json({
+      success: false,
+      error: "Élément introuvable",
+    });
+  }
+
+  // Si c'est une image, on supprime d'abord le fichier réel
+  if (item.type === "image" && item.storage_path) {
+    const { error: storageError } = await userSupabase.storage
+      .from("clipboard-images")
+      .remove([item.storage_path]);
+
+    if (storageError) {
+      return res.status(500).json({
+        success: false,
+        error: "Impossible de supprimer l'image du stockage",
+      });
+    }
+  }
+
+  // Puis on supprime l'entrée BDD
+  const { error: deleteError } = await userSupabase
+    .from("clipboard_items")
+    .delete()
+    .eq("id", item.id)
+    .eq("user_id", user.id);
+
+  if (deleteError) {
+    return res.status(500).json({
+      success: false,
+      error: deleteError.message,
     });
   }
 
   res.json({
     success: true,
-    message: "Texte supprimé",
+    message: "Élément supprimé",
   });
 });
 
