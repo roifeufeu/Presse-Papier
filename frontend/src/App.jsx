@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabase";
 import TextClipboard from "./components/TextClipboard";
+import ImageClipboard from "./components/ImageClipboard";
 
 function App() {
   const [email, setEmail] = useState("");
@@ -111,6 +112,10 @@ function App() {
         <hr />
 
         <TextClipboard />
+
+        <hr />
+
+        <ImageClipboard />
       </div>
     );
   }
