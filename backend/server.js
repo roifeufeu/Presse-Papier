@@ -2,6 +2,9 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const multer = require("multer");
+const crypto = require("crypto");
+const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 
 const supabase = createClient(
@@ -11,6 +14,18 @@ const supabase = createClient(
 
 const app = express();
 const PORT = 3000;
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Le fichier doit être une image"));
+    }
+
+    cb(null, true);
+  },
+});
 
 app.use(cors());
 app.use(express.json());
@@ -140,6 +155,101 @@ app.post("/items/text", async (req, res) => {
   res.status(201).json({
     success: true,
     message: "Texte enregistré",
+    item: data,
+  });
+});
+
+app.post("/items/image", upload.single("image"), async (req, res) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({
+      success: false,
+      error: "Token manquant",
+    });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser(token);
+
+  if (userError || !user) {
+    return res.status(401).json({
+      success: false,
+      error: "Utilisateur non authentifié",
+    });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({
+      success: false,
+      error: "Aucune image envoyée",
+    });
+  }
+
+  const userSupabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_PUBLISHABLE_KEY,
+    {
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    },
+  );
+
+  const extension = path.extname(req.file.originalname).toLowerCase();
+  const fileName = `${crypto.randomUUID()}${extension}`;
+  const storagePath = `${user.id}/${fileName}`;
+
+  const { error: uploadError } = await userSupabase.storage
+    .from("clipboard-images")
+    .upload(storagePath, req.file.buffer, {
+      contentType: req.file.mimetype,
+      upsert: false,
+    });
+
+  if (uploadError) {
+    return res.status(500).json({
+      success: false,
+      error: uploadError.message,
+    });
+  }
+
+  const { data, error: databaseError } = await userSupabase
+    .from("clipboard_items")
+    .insert({
+      user_id: user.id,
+      type: "image",
+      storage_path: storagePath,
+      original_filename: req.file.originalname,
+      mime_type: req.file.mimetype,
+      file_size: req.file.size,
+    })
+    .select()
+    .single();
+
+  if (databaseError) {
+    await userSupabase.storage.from("clipboard-images").remove([storagePath]);
+
+    return res.status(500).json({
+      success: false,
+      error: databaseError.message,
+    });
+  }
+
+  res.status(201).json({
+    success: true,
+    message: "Image enregistrée",
     item: data,
   });
 });
