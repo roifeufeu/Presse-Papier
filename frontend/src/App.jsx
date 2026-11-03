@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabase";
-import TextClipboard from "./components/TextClipboard";
-import ImageClipboard from "./components/ImageClipboard";
+import SendClipboard from "./components/SendClipboard";
 import ClipboardHistory from "./components/ClipboardHistory";
 
 function App() {
@@ -113,13 +112,7 @@ function App() {
 
         <hr />
 
-        <TextClipboard
-          onItemAdded={() => setHistoryVersion((version) => version + 1)}
-        />
-
-        <hr />
-
-        <ImageClipboard
+        <SendClipboard
           onItemAdded={() => setHistoryVersion((version) => version + 1)}
         />
 
