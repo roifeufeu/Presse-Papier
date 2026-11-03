@@ -12,6 +12,18 @@ const supabase = createClient(
   process.env.SUPABASE_PUBLISHABLE_KEY,
 );
 
+const adminSupabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SECRET_KEY,
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  },
+);
+
 const app = express();
 const PORT = 3000;
 
@@ -442,6 +454,7 @@ app.get("/items/history", async (req, res) => {
     .from("clipboard_items")
     .select("*")
     .eq("user_id", user.id)
+    .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -575,6 +588,81 @@ app.delete("/items/:id", async (req, res) => {
   res.json({
     success: true,
     message: "Élément supprimé",
+  });
+});
+
+app.post("/maintenance/cleanup-expired", async (req, res) => {
+  const cleanupSecret = req.headers["x-cleanup-secret"];
+
+  if (!cleanupSecret || cleanupSecret !== process.env.CLEANUP_SECRET) {
+    return res.status(401).json({
+      success: false,
+      error: "Non autorisé",
+    });
+  }
+
+  const now = new Date().toISOString();
+
+  // 1. Récupérer tous les éléments expirés
+  const { data: expiredItems, error: selectError } = await adminSupabase
+    .from("clipboard_items")
+    .select("id, type, storage_path")
+    .lte("expires_at", now);
+
+  if (selectError) {
+    return res.status(500).json({
+      success: false,
+      error: selectError.message,
+    });
+  }
+
+  if (!expiredItems || expiredItems.length === 0) {
+    return res.json({
+      success: true,
+      deleted: 0,
+      message: "Aucun élément expiré",
+    });
+  }
+
+  // 2. Récupérer les fichiers images à supprimer
+  const imagePaths = expiredItems
+    .filter((item) => item.type === "image" && item.storage_path)
+    .map((item) => item.storage_path);
+
+  // 3. Supprimer les fichiers réels dans Storage
+  if (imagePaths.length > 0) {
+    const { error: storageError } = await adminSupabase.storage
+      .from("clipboard-images")
+      .remove(imagePaths);
+
+    if (storageError) {
+      return res.status(500).json({
+        success: false,
+        error: "Impossible de supprimer les images expirées",
+      });
+    }
+  }
+
+  // 4. Supprimer les lignes de la BDD
+  const expiredIds = expiredItems.map((item) => item.id);
+
+  const { error: deleteError } = await adminSupabase
+    .from("clipboard_items")
+    .delete()
+    .in("id", expiredIds);
+
+  if (deleteError) {
+    return res.status(500).json({
+      success: false,
+      error: deleteError.message,
+    });
+  }
+
+  res.json({
+    success: true,
+    deleted: expiredItems.length,
+    deletedImages: imagePaths.length,
+    message: "Nettoyage terminé",
   });
 });
 

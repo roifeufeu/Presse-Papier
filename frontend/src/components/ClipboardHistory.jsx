@@ -1,14 +1,41 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+
+function getTimeUntilExpiration(expiresAt) {
+  if (!expiresAt) {
+    return null;
+  }
+
+  const now = new Date();
+  const expiration = new Date(expiresAt);
+
+  const difference = expiration - now;
+
+  if (difference <= 0) {
+    return "Expiré";
+  }
+
+  const minutes = Math.ceil(difference / (1000 * 60));
+  const hours = Math.ceil(difference / (1000 * 60 * 60));
+  const days = Math.ceil(difference / (1000 * 60 * 60 * 24));
+
+  if (difference < 1000 * 60 * 60) {
+    return `Expire dans ${minutes} min`;
+  }
+
+  if (difference < 1000 * 60 * 60 * 24) {
+    return `Expire dans ${hours} h`;
+  }
+
+  return `Expire dans ${days} j`;
+}
 
 function ClipboardHistory({ refreshKey }) {
   const [items, setItems] = useState([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const loadHistory = async () => {
-    setMessage("");
-
+  const loadHistory = useCallback(async () => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -30,7 +57,6 @@ function ClipboardHistory({ refreshKey }) {
 
       if (!response.ok) {
         setMessage(data.error || "Erreur lors du chargement de l'historique");
-        setLoading(false);
         return;
       }
 
@@ -40,11 +66,22 @@ function ClipboardHistory({ refreshKey }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadHistory();
-  }, [refreshKey]);
+    const initialLoad = setTimeout(() => {
+      loadHistory();
+    }, 0);
+
+    const interval = setInterval(() => {
+      loadHistory();
+    }, 60000);
+
+    return () => {
+      clearTimeout(initialLoad);
+      clearInterval(interval);
+    };
+  }, [loadHistory, refreshKey]);
 
   const copyText = async (text) => {
     try {
@@ -168,6 +205,8 @@ function ClipboardHistory({ refreshKey }) {
                 )}
               </>
             )}
+
+            <p>{getTimeUntilExpiration(item.expires_at)}</p>
 
             <button onClick={() => deleteItem(item.id)}>Supprimer</button>
 
