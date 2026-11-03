@@ -397,6 +397,90 @@ app.get("/items/images", async (req, res) => {
   });
 });
 
+app.get("/items/history", async (req, res) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({
+      success: false,
+      error: "Token manquant",
+    });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser(token);
+
+  if (userError || !user) {
+    return res.status(401).json({
+      success: false,
+      error: "Utilisateur non authentifié",
+    });
+  }
+
+  const userSupabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_PUBLISHABLE_KEY,
+    {
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    },
+  );
+
+  const { data: items, error } = await userSupabase
+    .from("clipboard_items")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+
+  const history = await Promise.all(
+    items.map(async (item) => {
+      if (item.type !== "image" || !item.storage_path) {
+        return item;
+      }
+
+      const { data, error: signedUrlError } = await userSupabase.storage
+        .from("clipboard-images")
+        .createSignedUrl(item.storage_path, 3600);
+
+      if (signedUrlError) {
+        return {
+          ...item,
+          image_url: null,
+        };
+      }
+
+      return {
+        ...item,
+        image_url: data.signedUrl,
+      };
+    }),
+  );
+
+  res.json({
+    success: true,
+    items: history,
+  });
+});
+
 app.delete("/items/:id", async (req, res) => {
   const authHeader = req.headers.authorization;
 

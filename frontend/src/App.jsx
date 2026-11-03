@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabase";
 import TextClipboard from "./components/TextClipboard";
 import ImageClipboard from "./components/ImageClipboard";
+import ClipboardHistory from "./components/ClipboardHistory";
 
 function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [session, setSession] = useState(null);
   const [message, setMessage] = useState("");
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -111,11 +113,19 @@ function App() {
 
         <hr />
 
-        <TextClipboard />
+        <TextClipboard
+          onItemAdded={() => setHistoryVersion((version) => version + 1)}
+        />
 
         <hr />
 
-        <ImageClipboard />
+        <ImageClipboard
+          onItemAdded={() => setHistoryVersion((version) => version + 1)}
+        />
+
+        <hr />
+
+        <ClipboardHistory refreshKey={historyVersion} />
       </div>
     );
   }
