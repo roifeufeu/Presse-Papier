@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "./lib/supabase";
 import SendClipboard from "./components/SendClipboard";
 import ClipboardHistory from "./components/ClipboardHistory";
+import Header from "./components/Header";
 
 function App() {
   const [email, setEmail] = useState("");
@@ -99,26 +100,18 @@ function App() {
 
   if (session) {
     return (
-      <div>
-        <h1 className="text-3xl font-bold text-blue-600">Connecté</h1>
+      <div className="min-h-screen bg-slate-50 text-slate-900">
+        <Header email={session.user.email} onLogout={logout} />
 
-        <p>{session.user.email}</p>
+        <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+          <SendClipboard
+            onItemAdded={() => setHistoryVersion((version) => version + 1)}
+          />
 
-        <button onClick={logout}>Se déconnecter</button>
-
-        <button onClick={testBackendAuth}>
-          Tester l'authentification backend
-        </button>
-
-        <hr />
-
-        <SendClipboard
-          onItemAdded={() => setHistoryVersion((version) => version + 1)}
-        />
-
-        <hr />
-
-        <ClipboardHistory refreshKey={historyVersion} />
+          <section className="mt-10">
+            <ClipboardHistory refreshKey={historyVersion} />
+          </section>
+        </main>
       </div>
     );
   }
