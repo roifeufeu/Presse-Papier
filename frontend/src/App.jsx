@@ -100,7 +100,7 @@ function App() {
   if (session) {
     return (
       <div>
-        <h1>Connecté</h1>
+        <h1 className="text-3xl font-bold text-blue-600">Connecté</h1>
 
         <p>{session.user.email}</p>
 
