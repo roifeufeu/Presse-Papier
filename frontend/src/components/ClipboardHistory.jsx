@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
   Copy,
+  Loader2,
   Download,
   FileText,
   Image as ImageIcon,
@@ -69,17 +70,35 @@ function ClipboardHistory({ refreshKey }) {
   const [filter, setFilter] = useState("all");
   const [expandedIds, setExpandedIds] = useState([]);
   const [message, setMessage] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
+  const deletingRef = useRef(false);
+  const [deletingId, setDeletingId] = useState(null);
+
+  useEffect(() => {
+    if (message !== "Élément supprimé") return;
+
+    const timeout = setTimeout(() => {
+      setMessage("");
+    }, 3000);
+
+    return () => clearTimeout(timeout);
+  }, [message]);
 
   const loadHistory = useCallback(async () => {
     try {
       const {
         data: { session },
+        error: sessionError,
       } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw new Error("Impossible de vérifier la session.");
+      }
 
       if (!session) {
         setItems([]);
-        return;
+        throw new Error("Tu dois être connecté pour consulter l'historique.");
       }
 
       const response = await fetch("http://localhost:3000/items/history", {
@@ -90,13 +109,26 @@ function ClipboardHistory({ refreshKey }) {
 
       const data = await response.json();
 
+      if (response.status === 401) {
+        throw new Error(
+          "Session expirée ou invalide. Déconnecte-toi puis reconnecte-toi.",
+        );
+      }
+
       if (!response.ok) {
-        throw new Error(data.error || "Impossible de charger l'historique");
+        throw new Error(data.error || "Impossible de charger l'historique.");
       }
 
       setItems(data.items);
+      setLoadError("");
     } catch (error) {
-      setMessage(error.message || "Impossible de contacter le serveur");
+      if (error instanceof TypeError) {
+        setLoadError(
+          "Impossible de contacter le serveur. Vérifie ta connexion puis réessaie.",
+        );
+      } else {
+        setLoadError(error.message || "Impossible de charger l'historique.");
+      }
     } finally {
       setLoading(false);
     }
@@ -151,15 +183,26 @@ function ClipboardHistory({ refreshKey }) {
   };
 
   const deleteItem = async (id) => {
+    if (deletingRef.current) return;
+
+    deletingRef.current = true;
+    setDeletingId(id);
+
     setMessage("");
 
     try {
       const {
         data: { session },
+        error: sessionError,
       } = await supabase.auth.getSession();
 
+      if (sessionError) {
+        setMessage("Impossible de vérifier la session. Réessaie.");
+        return;
+      }
+
       if (!session) {
-        setMessage("Tu dois être connecté");
+        setMessage("Tu dois être connecté pour supprimer un élément");
         return;
       }
 
@@ -172,14 +215,29 @@ function ClipboardHistory({ refreshKey }) {
 
       const data = await response.json();
 
+      if (response.status === 401) {
+        setMessage(
+          "Session expirée ou invalide. Déconnecte-toi puis reconnecte-toi.",
+        );
+        return;
+      }
+
       if (!response.ok) {
-        throw new Error(data.error || "Erreur lors de la suppression");
+        setMessage(data.error || "Erreur lors de la suppression");
+        return;
       }
 
       setMessage("Élément supprimé");
       await loadHistory();
     } catch (error) {
-      setMessage(error.message || "Impossible de contacter le serveur");
+      if (error instanceof TypeError) {
+        setMessage("Impossible de contacter le serveur. Réessaie.");
+      } else {
+        setMessage(error.message || "Impossible de supprimer l'élément");
+      }
+    } finally {
+      deletingRef.current = false;
+      setDeletingId(null);
     }
   };
 
@@ -190,6 +248,25 @@ function ClipboardHistory({ refreshKey }) {
   if (loading) {
     return (
       <p className="text-sm text-slate-500">Chargement de l'historique...</p>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div
+        role="alert"
+        className="rounded-xl border border-red-200 bg-red-50 p-5"
+      >
+        <p className="text-sm text-red-700">{loadError}</p>
+
+        <button
+          type="button"
+          onClick={() => void loadHistory()}
+          className="mt-3 rounded-lg bg-white px-4 py-2 text-sm font-medium text-red-700 border border-red-200 hover:bg-red-100"
+        >
+          Réessayer
+        </button>
+      </div>
     );
   }
 
@@ -223,6 +300,12 @@ function ClipboardHistory({ refreshKey }) {
           ))}
         </div>
       </div>
+
+      {loadError && (
+        <p role="alert" className="mb-4 text-sm text-red-600">
+          {loadError}
+        </p>
+      )}
 
       {message && (
         <p role="status" className="mb-4 text-sm text-slate-600">
@@ -321,13 +404,13 @@ function ClipboardHistory({ refreshKey }) {
                       )}
 
                       {/* Dates et actions image */}
-                      <div className="mt-4 border-t border-slate-100 pt-3 sm:mt-3 sm:border-t-0 sm:pt-0">
+                      <div className="mt-4 border-t border-slate-100 pt-3 sm:mt-3 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:border-t-0 sm:pt-0">
                         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
                           <span>{ageLabel(item.created_at)}</span>
                           <span>{expirationLabel(item.expires_at)}</span>
                         </div>
 
-                        <div className="mt-3 flex items-center gap-2">
+                        <div className="mt-3 flex items-center gap-2 sm:mt-0">
                           {item.image_url && (
                             <button
                               type="button"
@@ -346,11 +429,16 @@ function ClipboardHistory({ refreshKey }) {
 
                           <button
                             type="button"
+                            disabled={deletingId !== null}
                             onClick={() => deleteItem(item.id)}
                             aria-label="Supprimer l'élément"
-                            className="inline-flex items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                            className="inline-flex items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            <Trash2 size={17} />
+                            {deletingId === item.id ? (
+                              <Loader2 size={17} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={17} />
+                            )}
                           </button>
                         </div>
                       </div>
@@ -371,7 +459,7 @@ function ClipboardHistory({ refreshKey }) {
                       <button
                         type="button"
                         onClick={() => copyText(text)}
-                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Copy size={16} />
                         Copier
@@ -380,10 +468,15 @@ function ClipboardHistory({ refreshKey }) {
                       <button
                         type="button"
                         onClick={() => deleteItem(item.id)}
+                        disabled={deletingId !== null}
                         aria-label="Supprimer l'élément"
-                        className="inline-flex items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                        className="inline-flex items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <Trash2 size={17} />
+                        {deletingId === item.id ? (
+                          <Loader2 size={17} className="animate-spin" />
+                        ) : (
+                          <Trash2 size={17} />
+                        )}
                       </button>
                     </div>
                   </div>

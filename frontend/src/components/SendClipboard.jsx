@@ -1,6 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { ImagePlus, Send, X } from "lucide-react";
+
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
 function SendClipboard({ onItemAdded }) {
   const [text, setText] = useState("");
@@ -9,6 +11,20 @@ function SendClipboard({ onItemAdded }) {
   const [message, setMessage] = useState("");
 
   const fileInputRef = useRef(null);
+  const sendingRef = useRef(false);
+  const [isSending, setIsSending] = useState(false);
+
+  useEffect(() => {
+    if (message !== "Texte enregistré" && message !== "Image enregistrée") {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setMessage("");
+    }, 3000);
+
+    return () => clearTimeout(timeout);
+  }, [message]);
 
   const chooseImage = () => {
     fileInputRef.current?.click();
@@ -17,7 +33,25 @@ function SendClipboard({ onItemAdded }) {
   const handleImageChange = (event) => {
     const selectedImage = event.target.files?.[0];
 
-    if (!selectedImage) {
+    if (!selectedImage) return;
+
+    if (!selectedImage.type.startsWith("image/")) {
+      setMessage("Le fichier doit être une image");
+      event.target.value = "";
+      return;
+    }
+
+    if (selectedImage.size > MAX_IMAGE_SIZE) {
+      const size = (selectedImage.size / (1024 * 1024)).toLocaleString(
+        "fr-FR",
+        {
+          maximumFractionDigits: 2,
+        },
+      );
+
+      setMessage(`Image trop volumineuse (${size} Mo / 10 Mo maximum)`);
+
+      event.target.value = "";
       return;
     }
 
@@ -44,30 +78,46 @@ function SendClipboard({ onItemAdded }) {
   };
 
   const sendText = async () => {
+    // Empêcher plusieurs envois simultanés
+    if (sendingRef.current) return;
+
+    sendingRef.current = true;
+    setIsSending(true);
     setMessage("");
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
-      setMessage("Tu dois être connecté");
-      return;
-    }
-
     try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        setMessage("Impossible de vérifier la session. Réessaie.");
+        return;
+      }
+
+      if (!session) {
+        setMessage("Tu dois être connecté pour envoyer un texte");
+        return;
+      }
+
       const response = await fetch("http://localhost:3000/items/text", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({
-          text,
-        }),
+        body: JSON.stringify({ text }),
       });
 
       const data = await response.json();
+
+      if (response.status === 401) {
+        setMessage(
+          "Session expirée ou invalide. Déconnecte-toi puis reconnecte-toi.",
+        );
+        return;
+      }
 
       if (!response.ok) {
         setMessage(data.error || "Erreur lors de l'envoi");
@@ -76,33 +126,42 @@ function SendClipboard({ onItemAdded }) {
 
       setText("");
       setMessage("Texte enregistré");
-
       onItemAdded?.();
     } catch {
-      setMessage("Impossible de contacter le serveur");
+      setMessage("Impossible de contacter le serveur ou de traiter sa réponse");
+    } finally {
+      // Réactiver le bouton dans tous les cas
+      sendingRef.current = false;
+      setIsSending(false);
     }
   };
 
   const sendImage = async () => {
+    if (!image || sendingRef.current) return;
+
+    sendingRef.current = true;
+    setIsSending(true);
     setMessage("");
 
-    if (!image) {
-      return;
-    }
-
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
-      setMessage("Tu dois être connecté");
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("image", image);
-
     try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        setMessage("Impossible de vérifier la session. Réessaie.");
+        return;
+      }
+
+      if (!session) {
+        setMessage("Tu dois être connecté pour envoyer une image");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("image", image);
+
       const response = await fetch("http://localhost:3000/items/image", {
         method: "POST",
         headers: {
@@ -113,18 +172,26 @@ function SendClipboard({ onItemAdded }) {
 
       const data = await response.json();
 
+      if (response.status === 401) {
+        setMessage(
+          "Session expirée ou invalide. Déconnecte-toi puis reconnecte-toi.",
+        );
+        return;
+      }
+
       if (!response.ok) {
         setMessage(data.error || "Erreur lors de l'envoi");
         return;
       }
 
       clearImage();
-
       setMessage("Image enregistrée");
-
       onItemAdded?.();
     } catch {
-      setMessage("Impossible de contacter le serveur");
+      setMessage("Impossible de contacter le serveur ou de traiter sa réponse");
+    } finally {
+      sendingRef.current = false;
+      setIsSending(false);
     }
   };
 
@@ -168,10 +235,11 @@ function SendClipboard({ onItemAdded }) {
             <button
               type="button"
               onClick={sendText}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700"
+              disabled={isSending}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Send size={17} />
-              Envoyer le texte
+              {isSending ? "Envoi en cours..." : "Envoyer le texte"}
             </button>
           </div>
         </>
@@ -185,7 +253,19 @@ function SendClipboard({ onItemAdded }) {
             />
           </div>
 
-          <p className="mt-3 break-all text-sm text-slate-600">{image.name}</p>
+          <div className="mt-3">
+            <p className="break-all text-sm font-medium text-slate-700">
+              {image.name}
+            </p>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Taille :{" "}
+              {(image.size / (1024 * 1024)).toLocaleString("fr-FR", {
+                maximumFractionDigits: 2,
+              })}{" "}
+              Mo / 10 Mo maximum
+            </p>
+          </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <button
@@ -200,10 +280,11 @@ function SendClipboard({ onItemAdded }) {
             <button
               type="button"
               onClick={sendImage}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700"
+              disabled={isSending}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Send size={17} />
-              Envoyer l'image
+              {isSending ? "Envoi en cours..." : "Envoyer l'image"}
             </button>
           </div>
         </>
