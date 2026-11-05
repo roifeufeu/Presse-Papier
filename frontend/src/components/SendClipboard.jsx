@@ -101,14 +101,17 @@ function SendClipboard({ onItemAdded }) {
         return;
       }
 
-      const response = await fetch("http://localhost:3000/items/text", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/items/text`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ text }),
         },
-        body: JSON.stringify({ text }),
-      });
+      );
 
       const data = await response.json();
 
@@ -162,13 +165,16 @@ function SendClipboard({ onItemAdded }) {
       const formData = new FormData();
       formData.append("image", image);
 
-      const response = await fetch("http://localhost:3000/items/image", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/items/image`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: formData,
         },
-        body: formData,
-      });
+      );
 
       const data = await response.json();
 

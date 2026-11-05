@@ -101,11 +101,14 @@ function ClipboardHistory({ refreshKey }) {
         throw new Error("Tu dois être connecté pour consulter l'historique.");
       }
 
-      const response = await fetch("http://localhost:3000/items/history", {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/items/history`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
         },
-      });
+      );
 
       const data = await response.json();
 
@@ -206,12 +209,15 @@ function ClipboardHistory({ refreshKey }) {
         return;
       }
 
-      const response = await fetch(`http://localhost:3000/items/${id}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/items/${id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
         },
-      });
+      );
 
       const data = await response.json();
 

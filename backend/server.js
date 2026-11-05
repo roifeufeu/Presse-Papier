@@ -25,7 +25,7 @@ const adminSupabase = createClient(
 );
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -44,7 +44,17 @@ const upload = multer({
   },
 });
 
-app.use(cors());
+const allowedOrigins = (process.env.FRONTEND_ORIGINS || "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+  }),
+);
+
 app.use(express.json());
 
 async function requireAuth(req, res, next) {
@@ -90,57 +100,6 @@ async function requireAuth(req, res, next) {
 
 app.get("/", (req, res) => {
   res.json({ message: "Backend OK" });
-});
-
-app.get("/test-supabase", async (req, res) => {
-  const { data, error } = await supabase.from("clipboard_items").select("id");
-
-  if (error) {
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-
-  res.json({
-    success: true,
-    message: "Connexion Supabase OK",
-    data,
-  });
-});
-
-app.get("/test-auth", async (req, res) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader) {
-    return res.status(401).json({
-      success: false,
-      error: "Token manquant",
-    });
-  }
-
-  const token = authHeader.replace("Bearer ", "");
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser(token);
-
-  if (error || !user) {
-    return res.status(401).json({
-      success: false,
-      error: "Token invalide",
-    });
-  }
-
-  res.json({
-    success: true,
-    message: "Utilisateur authentifié",
-    user: {
-      id: user.id,
-      email: user.email,
-    },
-  });
 });
 
 app.post("/items/text", async (req, res) => {
@@ -204,9 +163,11 @@ app.post("/items/text", async (req, res) => {
     .single();
 
   if (error) {
+    console.error("Erreur enregistrement texte :", error);
+
     return res.status(500).json({
       success: false,
-      error: error.message,
+      error: "Impossible d'enregistrer le texte. Réessaie.",
     });
   }
 
@@ -252,7 +213,33 @@ app.post(
       });
     }
 
-    console.log("Nom reçu par Multer :", req.file.originalname);
+    let detectedType;
+
+    try {
+      const { fileTypeFromBuffer } = await import("file-type");
+      detectedType = await fileTypeFromBuffer(req.file.buffer);
+    } catch (error) {
+      console.error("Erreur de vérification du fichier :", error);
+
+      return res.status(500).json({
+        success: false,
+        error: "Impossible de vérifier le fichier",
+      });
+    }
+
+    const allowedImageTypes = new Set([
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
+    ]);
+
+    if (!detectedType || !allowedImageTypes.has(detectedType.mime)) {
+      return res.status(400).json({
+        success: false,
+        error: "Format non autorisé (JPG, PNG, WebP ou GIF)",
+      });
+    }
 
     const userSupabase = createClient(
       process.env.SUPABASE_URL,
@@ -271,21 +258,22 @@ app.post(
       },
     );
 
-    const extension = path.extname(req.file.originalname).toLowerCase();
-    const fileName = `${crypto.randomUUID()}${extension}`;
+    const fileName = `${crypto.randomUUID()}.${detectedType.ext}`;
     const storagePath = `${user.id}/${fileName}`;
 
     const { error: uploadError } = await userSupabase.storage
       .from("clipboard-images")
       .upload(storagePath, req.file.buffer, {
-        contentType: req.file.mimetype,
+        contentType: detectedType.mime,
         upsert: false,
       });
 
     if (uploadError) {
+      console.error("Erreur upload image :", uploadError);
+
       return res.status(500).json({
         success: false,
-        error: uploadError.message,
+        error: "Impossible d'envoyer l'image. Réessaie.",
       });
     }
 
@@ -296,18 +284,27 @@ app.post(
         type: "image",
         storage_path: storagePath,
         original_filename: req.file.originalname,
-        mime_type: req.file.mimetype,
+        mime_type: detectedType.mime,
         file_size: req.file.size,
       })
       .select()
       .single();
 
     if (databaseError) {
-      await userSupabase.storage.from("clipboard-images").remove([storagePath]);
+      console.error("Erreur enregistrement image :", databaseError);
+
+      // Supprimer l'image envoyée si l'enregistrement BDD échoue
+      const { error: cleanupError } = await userSupabase.storage
+        .from("clipboard-images")
+        .remove([storagePath]);
+
+      if (cleanupError) {
+        console.error("Erreur nettoyage image :", cleanupError);
+      }
 
       return res.status(500).json({
         success: false,
-        error: databaseError.message,
+        error: "Impossible d'enregistrer l'image. Réessaie.",
       });
     }
 
@@ -508,9 +505,11 @@ app.get("/items/history", async (req, res) => {
     .order("created_at", { ascending: false });
 
   if (error) {
+    console.error("Erreur récupération historique :", error);
+
     return res.status(500).json({
       success: false,
-      error: error.message,
+      error: "Impossible de charger l'historique. Réessaie.",
     });
   }
 
@@ -525,6 +524,8 @@ app.get("/items/history", async (req, res) => {
         .createSignedUrl(item.storage_path, 3600);
 
       if (signedUrlError) {
+        console.error("Erreur génération URL image :", signedUrlError);
+
         return {
           ...item,
           image_url: null,
@@ -758,6 +759,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Serveur lancé sur http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Serveur lancé sur le port ${PORT}`);
 });
