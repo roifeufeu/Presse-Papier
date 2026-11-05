@@ -14,7 +14,7 @@ function Header({ email, onLogout }) {
           </div>
 
           <span className="text-xl font-bold tracking-tight text-slate-900">
-            Cloud<span className="text-blue-600">Clip</span>
+            Syn<span className="text-blue-600">Cli</span>
           </span>
         </div>
 

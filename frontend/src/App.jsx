@@ -104,7 +104,7 @@ function App() {
           </div>
 
           <span className="text-3xl font-bold tracking-tight">
-            Cloud<span className="text-blue-600">Clip</span>
+            Syn<span className="text-blue-600">Cli</span>
           </span>
         </div>
 

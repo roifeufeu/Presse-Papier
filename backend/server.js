@@ -31,6 +31,10 @@ const upload = multer({
   storage: multer.memoryStorage(),
   defParamCharset: "utf8",
 
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10 Mo maximum
+  },
+
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith("image/")) {
       return cb(new Error("Le fichier doit être une image"));
@@ -663,6 +667,48 @@ app.post("/maintenance/cleanup-expired", async (req, res) => {
     deleted: expiredItems.length,
     deletedImages: imagePaths.length,
     message: "Nettoyage terminé",
+  });
+});
+
+app.use((err, req, res, next) => {
+  console.error("Erreur serveur :", err);
+
+  // Erreurs liées à Multer
+
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({
+        success: false,
+        error: "Image trop volumineuse (maximum 10 Mo)",
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: "Erreur lors de l'envoi du fichier",
+    });
+  }
+
+  // Fichier non autorisé
+  if (err.message === "Le fichier doit être une image") {
+    return res.status(400).json({
+      success: false,
+      error: "Le fichier doit être une image",
+    });
+  }
+
+  // JSON invalide
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({
+      success: false,
+      error: "Les données envoyées sont invalides",
+    });
+  }
+
+  // Autres erreurs inattendues
+  return res.status(500).json({
+    success: false,
+    error: "Une erreur interne est survenue",
   });
 });
 
