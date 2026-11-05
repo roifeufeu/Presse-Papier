@@ -47,6 +47,47 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
+async function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({
+      success: false,
+      error: "Token manquant",
+    });
+  }
+
+  const token = authHeader.slice(7).trim();
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Token manquant",
+    });
+  }
+
+  try {
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(token);
+
+    if (error || !user) {
+      return res.status(401).json({
+        success: false,
+        error: "Utilisateur non authentifié",
+      });
+    }
+
+    req.user = user;
+    req.accessToken = token;
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 app.get("/", (req, res) => {
   res.json({ message: "Backend OK" });
 });
@@ -176,102 +217,107 @@ app.post("/items/text", async (req, res) => {
   });
 });
 
-app.post("/items/image", upload.single("image"), async (req, res) => {
-  const authHeader = req.headers.authorization;
+app.post(
+  "/items/image",
+  requireAuth,
+  upload.single("image"),
+  async (req, res) => {
+    const authHeader = req.headers.authorization;
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({
-      success: false,
-      error: "Token manquant",
-    });
-  }
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        error: "Token manquant",
+      });
+    }
 
-  const token = authHeader.split(" ")[1];
+    const token = authHeader.split(" ")[1];
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser(token);
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser(token);
 
-  if (userError || !user) {
-    return res.status(401).json({
-      success: false,
-      error: "Utilisateur non authentifié",
-    });
-  }
+    if (userError || !user) {
+      return res.status(401).json({
+        success: false,
+        error: "Utilisateur non authentifié",
+      });
+    }
 
-  if (!req.file) {
-    return res.status(400).json({
-      success: false,
-      error: "Aucune image envoyée",
-    });
-  }
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: "Aucune image envoyée",
+      });
+    }
 
-  console.log("Nom reçu par Multer :", req.file.originalname);
+    console.log("Nom reçu par Multer :", req.file.originalname);
 
-  const userSupabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_PUBLISHABLE_KEY,
-    {
-      global: {
-        headers: {
-          Authorization: `Bearer ${token}`,
+    const userSupabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_PUBLISHABLE_KEY,
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
         },
       },
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-    },
-  );
+    );
 
-  const extension = path.extname(req.file.originalname).toLowerCase();
-  const fileName = `${crypto.randomUUID()}${extension}`;
-  const storagePath = `${user.id}/${fileName}`;
+    const extension = path.extname(req.file.originalname).toLowerCase();
+    const fileName = `${crypto.randomUUID()}${extension}`;
+    const storagePath = `${user.id}/${fileName}`;
 
-  const { error: uploadError } = await userSupabase.storage
-    .from("clipboard-images")
-    .upload(storagePath, req.file.buffer, {
-      contentType: req.file.mimetype,
-      upsert: false,
+    const { error: uploadError } = await userSupabase.storage
+      .from("clipboard-images")
+      .upload(storagePath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: false,
+      });
+
+    if (uploadError) {
+      return res.status(500).json({
+        success: false,
+        error: uploadError.message,
+      });
+    }
+
+    const { data, error: databaseError } = await userSupabase
+      .from("clipboard_items")
+      .insert({
+        user_id: user.id,
+        type: "image",
+        storage_path: storagePath,
+        original_filename: req.file.originalname,
+        mime_type: req.file.mimetype,
+        file_size: req.file.size,
+      })
+      .select()
+      .single();
+
+    if (databaseError) {
+      await userSupabase.storage.from("clipboard-images").remove([storagePath]);
+
+      return res.status(500).json({
+        success: false,
+        error: databaseError.message,
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Image enregistrée",
+      item: data,
     });
-
-  if (uploadError) {
-    return res.status(500).json({
-      success: false,
-      error: uploadError.message,
-    });
-  }
-
-  const { data, error: databaseError } = await userSupabase
-    .from("clipboard_items")
-    .insert({
-      user_id: user.id,
-      type: "image",
-      storage_path: storagePath,
-      original_filename: req.file.originalname,
-      mime_type: req.file.mimetype,
-      file_size: req.file.size,
-    })
-    .select()
-    .single();
-
-  if (databaseError) {
-    await userSupabase.storage.from("clipboard-images").remove([storagePath]);
-
-    return res.status(500).json({
-      success: false,
-      error: databaseError.message,
-    });
-  }
-
-  res.status(201).json({
-    success: true,
-    message: "Image enregistrée",
-    item: data,
-  });
-});
+  },
+);
 
 app.get("/items", async (req, res) => {
   const authHeader = req.headers.authorization;
